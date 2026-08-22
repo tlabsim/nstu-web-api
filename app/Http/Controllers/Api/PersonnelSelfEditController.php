@@ -514,7 +514,7 @@ class PersonnelSelfEditController extends Controller
         $file = $request->file('image');
         $extension = strtolower($file->getClientOriginalExtension()) ?: $file->guessExtension();
         $storedName = 'research-' . Str::random(20) . '.' . $extension;
-        $path = $file->storeAs('research', $storedName, 'public');
+        $path = $file->storeAs('faculty_profiles/research', $storedName, 'public');
 
         return response()->json([
             'status' => 'success',
