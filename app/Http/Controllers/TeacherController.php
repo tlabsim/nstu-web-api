@@ -7,6 +7,7 @@ use App\Models\PersonnelProfile;
 use App\Models\Publication;
 use App\Models\Research;
 use App\Models\SeminarWorkshopTraining;
+use App\Services\BreadcrumbLinkService;
 use App\Services\ImsContactService;
 use App\Services\ImsPersonnelCacheService;
 use App\Services\ImsTeacherCacheService;
@@ -21,7 +22,8 @@ class TeacherController extends Controller
     public function __construct(
         protected ImsTeacherCacheService $teacherCacheService,
         protected ImsContactService $contactService,
-        protected ImsPersonnelCacheService $personnelCacheService
+        protected ImsPersonnelCacheService $personnelCacheService,
+        protected BreadcrumbLinkService $breadcrumbLinkService
     ) {
     }
 
@@ -319,6 +321,12 @@ class TeacherController extends Controller
                     'entity_display_name' => data_get($cache, 'primary_affiliation_name'),
                     'affiliation_type' => data_get($cache, 'primary_affiliation_type'),
                 ],
+                'breadcrumb' => $this->breadcrumbLinkService->build(
+                    $primaryAffiliation ? (int) $primaryAffiliation->entity_id : data_get($cache, 'primary_affiliation_entity_id'),
+                    $primaryAffiliation
+                        ? ($primaryAffiliation->entity_display_name ?: $primaryAffiliation->entity_name)
+                        : data_get($cache, 'primary_affiliation_name')
+                ),
                 'affiliations' => $affiliations->map(fn ($item) => [
                     'entity_id' => (int) $item->entity_id,
                     'entity_name' => $item->entity_name,
