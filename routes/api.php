@@ -61,6 +61,7 @@ Route::middleware([])->group(function () {
     Route::get('personnel', [PersonnelController::class, 'show']);     // Input: ?personnel_id
     Route::get('teachers', [TeacherController::class, 'index']);       // Input: ?entity_id, optional filters
     Route::get('teacher', [TeacherController::class, 'show']);         // Input: ?personnel_id, optional: ?entity_id
+    Route::get('teacher-directory', [TeacherController::class, 'directory']); // Complete alphabetical teacher directory
     Route::get('search', [SearchController::class, 'index']);          // Input: ?entity_id&q=
 
     // 🔹 Publications

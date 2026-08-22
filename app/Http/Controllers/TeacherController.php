@@ -8,17 +8,20 @@ use App\Models\Publication;
 use App\Models\Research;
 use App\Models\SeminarWorkshopTraining;
 use App\Services\ImsContactService;
+use App\Services\ImsPersonnelCacheService;
 use App\Services\ImsTeacherCacheService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 
 class TeacherController extends Controller
 {
     public function __construct(
         protected ImsTeacherCacheService $teacherCacheService,
-        protected ImsContactService $contactService
+        protected ImsContactService $contactService,
+        protected ImsPersonnelCacheService $personnelCacheService
     ) {
     }
 
@@ -128,6 +131,77 @@ class TeacherController extends Controller
         ]);
     }
 
+    /**
+     * University-wide teacher directory. Proxies IMS /personnels?type=Teacher
+     * server-side (with the API key) and returns a flat, alphabetically sorted
+     * list of {personnel_id, name, designation} for the directory page.
+     */
+    public function directory(Request $request): JsonResponse
+    {
+        $baseUrl = rtrim((string) config('ims.api_base_url'), '/');
+        $apiKey = (string) config('ims.api_key');
+
+        if ($baseUrl === '') {
+            return response()->json(['status' => 'error', 'message' => 'IMS API base URL is not configured.'], 500);
+        }
+
+        $items = [];
+        $page = 1;
+        $lastPage = 1;
+
+        try {
+            do {
+                $response = Http::baseUrl($baseUrl)
+                    ->acceptJson()
+                    ->timeout(20)
+                    ->withHeaders(['X-API-KEY' => $apiKey])
+                    ->get('personnels', [
+                        'type' => 'Teacher',
+                        'status' => 'Active',
+                        'include' => 'designation',
+                        'per_page' => 100,
+                        'page' => $page,
+                    ]);
+
+                if ($response->failed()) {
+                    \Log::warning('Teacher directory fetch failed from IMS.', ['status' => $response->status()]);
+                    break;
+                }
+
+                $payload = $response->json();
+                $batch = (array) data_get($payload, 'data', []);
+                foreach ($batch as $teacher) {
+                    $items[] = $teacher;
+                }
+
+                $currentPage = (int) data_get($payload, 'meta.current_page', $page);
+                $lastPage = (int) data_get($payload, 'meta.last_page', $currentPage);
+                $page++;
+            } while ($page <= $lastPage);
+        } catch (\Throwable $e) {
+            \Log::warning('Teacher directory fetch threw.', ['error' => $e->getMessage()]);
+        }
+
+        $teachers = collect($items)
+            ->map(fn ($t) => [
+                'personnel_id' => (string) data_get($t, 'id', ''),
+                'name' => trim((string) data_get($t, 'full_name_with_title', data_get($t, 'full_name', ''))),
+                'first_name' => trim((string) data_get($t, 'first_name', '')),
+                'last_name' => trim((string) data_get($t, 'last_name', '')),
+                'designation' => (string) data_get($t, 'designation_name', data_get($t, 'designation.designation_name', '')),
+                'primary_affiliation' => (string) data_get($t, 'primary_affiliation', ''),
+            ])
+            ->filter(fn ($t) => $t['personnel_id'] !== '')
+            ->sortBy(fn ($t) => strtoupper($t['first_name'] . ' ' . $t['last_name']))
+            ->values()
+            ->all();
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $teachers,
+        ]);
+    }
+
     public function show(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -151,6 +225,25 @@ class TeacherController extends Controller
                 'researcherProfile.externalProfiles',
             ])
             ->find($personnelId);
+
+        if (!$profile) {
+            // Auto-provision the profile on first visit (IMS is the source of truth).
+            $profile = $this->personnelCacheService->ensureProfile($personnelId)
+                ? PersonnelProfile::query()
+                    ->with([
+                        'cache',
+                        'affiliationCache',
+                        'educations',
+                        'jobExperiences',
+                        'achievements',
+                        'professionalProfiles',
+                        'webSettings',
+                        'additionalData',
+                        'researcherProfile.externalProfiles',
+                    ])
+                    ->find($personnelId)
+                : null;
+        }
 
         if (!$profile) {
             return response()->json(['status' => 'error', 'message' => 'Teacher profile not found'], 404);
